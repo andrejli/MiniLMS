@@ -6,6 +6,8 @@ from flask_sqlalchemy import SQLAlchemy
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import smtplib
+import bleach
+from markupsafe import Markup
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -13,6 +15,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///minilms.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Email configuration (optional - can be set via environment variables)
+# For Gmail, you need to use an app-specific password, not your regular password
+# See: https://support.google.com/accounts/answer/185833
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
 app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True') == 'True'
@@ -49,6 +53,22 @@ class AccessCode(db.Model):
 def generate_access_code():
     """Generate a random 12-character access code"""
     return secrets.token_urlsafe(9)[:12].upper()
+
+def sanitize_html(html_content):
+    """Sanitize HTML content to prevent XSS attacks"""
+    # Allow only safe HTML tags and attributes
+    allowed_tags = ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 
+                    'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'a', 'span', 'div']
+    allowed_attrs = {'a': ['href', 'title'], 'span': ['class'], 'div': ['class']}
+    
+    cleaned = bleach.clean(html_content, tags=allowed_tags, attributes=allowed_attrs, strip=True)
+    return Markup(cleaned)
+
+def check_admin_access():
+    """Check if user has admin access. For minimal LMS, this is a simple password check."""
+    # In production, use proper authentication like Flask-Login
+    admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
+    return session.get('admin_authenticated') == admin_password
 
 def send_access_code_email(email, code, course_title):
     """Send access code via email"""
@@ -99,6 +119,8 @@ def course_detail(course_id):
     # Check if user has access via session
     accessed_courses = session.get('accessed_courses', [])
     if course_id in accessed_courses:
+        # Sanitize course content before rendering
+        course.content = sanitize_html(course.content)
         return render_template('course_detail.html', course=course)
     
     # User needs to enter access code
@@ -169,16 +191,47 @@ def request_access(course_id):
     
     return render_template('request_access.html', course=course)
 
-# Admin routes (simplified - no authentication for minimal LMS)
+# Admin routes (simplified - password-based authentication for minimal LMS)
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    """Simple admin login"""
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
+        
+        if password == admin_password:
+            session['admin_authenticated'] = admin_password
+            flash('Logged in successfully!', 'success')
+            return redirect(url_for('admin'))
+        else:
+            flash('Invalid password.', 'error')
+    
+    return render_template('admin_login.html')
+
+@app.route('/admin/logout')
+def admin_logout():
+    """Admin logout"""
+    session.pop('admin_authenticated', None)
+    flash('Logged out successfully.', 'success')
+    return redirect(url_for('index'))
+
 @app.route('/admin')
 def admin():
     """Simple admin panel to manage courses"""
+    if not check_admin_access():
+        flash('Please log in to access the admin panel.', 'error')
+        return redirect(url_for('admin_login'))
+    
     courses = Course.query.all()
     return render_template('admin.html', courses=courses)
 
 @app.route('/admin/course/new', methods=['GET', 'POST'])
 def new_course():
     """Create a new course"""
+    if not check_admin_access():
+        flash('Please log in to access the admin panel.', 'error')
+        return redirect(url_for('admin_login'))
+    
     if request.method == 'POST':
         title = request.form.get('title', '').strip()
         description = request.form.get('description', '').strip()
@@ -198,6 +251,10 @@ def new_course():
 @app.route('/admin/course/<int:course_id>/edit', methods=['GET', 'POST'])
 def edit_course(course_id):
     """Edit an existing course"""
+    if not check_admin_access():
+        flash('Please log in to access the admin panel.', 'error')
+        return redirect(url_for('admin_login'))
+    
     course = Course.query.get_or_404(course_id)
     
     if request.method == 'POST':
@@ -217,6 +274,10 @@ def edit_course(course_id):
 @app.route('/admin/course/<int:course_id>/delete', methods=['POST'])
 def delete_course(course_id):
     """Delete a course"""
+    if not check_admin_access():
+        flash('Please log in to access the admin panel.', 'error')
+        return redirect(url_for('admin_login'))
+    
     course = Course.query.get_or_404(course_id)
     db.session.delete(course)
     db.session.commit()
@@ -226,6 +287,10 @@ def delete_course(course_id):
 @app.route('/admin/course/<int:course_id>/codes')
 def view_access_codes(course_id):
     """View access codes for a course"""
+    if not check_admin_access():
+        flash('Please log in to access the admin panel.', 'error')
+        return redirect(url_for('admin_login'))
+    
     course = Course.query.get_or_404(course_id)
     access_codes = AccessCode.query.filter_by(course_id=course_id).order_by(AccessCode.created_at.desc()).all()
     return render_template('access_codes.html', course=course, access_codes=access_codes)

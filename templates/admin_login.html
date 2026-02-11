@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Login - MiniLMS{% endblock %}
+
+{% block content %}
+<div class="access-page">
+    <div class="access-card">
+        <h1>Admin Login</h1>
+        <p>Enter the admin password to access the admin panel.</p>
+
+        <form method="POST" class="form">
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required class="form-control" placeholder="Enter admin password">
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Login</button>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+
+        <div class="info-box">
+            <p><strong>Default password:</strong> admin123</p>
+            <p>Set ADMIN_PASSWORD environment variable to change it.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

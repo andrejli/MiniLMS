@@ -57,13 +57,21 @@ python app.py
 The application can be configured using environment variables in a `.env` file:
 
 - `SECRET_KEY`: Flask secret key for sessions (required for production)
+- `ADMIN_PASSWORD`: Password for admin panel access (default: admin123)
 - `MAIL_SERVER`: SMTP server address (default: smtp.gmail.com)
 - `MAIL_PORT`: SMTP port (default: 587)
 - `MAIL_USE_TLS`: Use TLS encryption (default: True)
 - `MAIL_USERNAME`: Email address for sending codes
-- `MAIL_PASSWORD`: Email password or app-specific password
+- `MAIL_PASSWORD`: Email password or app-specific password (for Gmail, use app-specific password)
 
 **Note**: If email is not configured, access codes will be displayed on the screen instead of being sent via email.
+
+## Security Features
+
+- **Admin Authentication**: Password-based access to admin panel (configurable via ADMIN_PASSWORD)
+- **XSS Protection**: HTML content sanitization to prevent cross-site scripting attacks
+- **Session-based Access Control**: Course access managed through Flask sessions
+- **Single-use Access Codes**: Each access code can only be used once
 
 ## Database
 
