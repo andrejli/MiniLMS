@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="product-detail">
+  <div class="product-detail-header">
+    <a class="back-button" href="{{ url_for('home') }}">Back to courses</a>
+    <div class="product-detail-category">{{ course.category }}</div>
+    <h2 class="product-detail-name">{{ course.title }}</h2>
+  </div>
+  <div class="product-detail-content">
+    <div class="product-detail-info">
+      <div class="product-detail-section">
+        <h3>Overview</h3>
+        <p class="product-detail-description">{{ course.summary }}</p>
+      </div>
+      <div class="product-detail-section">
+        <h3>Lessons</h3>
+        <ul>
+          {% for lesson in lessons %}
+          <li>
+            <div class="product-detail-description">{{ lesson.title }}</div>
+            {% if lesson.hex %}
+            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lesson_access', slug=course.slug, lesson_id=lesson.id) }}">REQUIRE ACCESS KEY</a>
+            {% else %}
+            <span class="btn-add-cart" style="display:inline-block;">COMING SOON</span>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="product-detail-stats">
+        <div class="product-detail-stat">
+          <span class="stat-label">Level</span>
+          <span class="stat-value">{{ course.level }}</span>
+        </div>
+        <div class="product-detail-stat">
+          <span class="stat-label">Lessons</span>
+          <span class="stat-value">{{ lessons_count }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="product-detail-image-container">
+      <div class="product-detail-image-placeholder"></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
