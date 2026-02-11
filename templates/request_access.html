@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Request Access - {{ course.title }}{% endblock %}
+
+{% block content %}
+<div class="access-page">
+    <div class="access-card">
+        <h1>Request Access Code</h1>
+        <h2>{{ course.title }}</h2>
+        <p>Enter your email address to receive an access code for this course.</p>
+
+        <form method="POST" class="form">
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" required class="form-control" placeholder="your@email.com">
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Request Access Code</button>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+
+        <div class="info-box">
+            <p><strong>Note:</strong> If email is not configured, your access code will be displayed on the screen.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
