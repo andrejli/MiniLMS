@@ -298,4 +298,7 @@ def view_access_codes(course_id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+    # Debug mode should be disabled in production
+    # Set FLASK_DEBUG=1 environment variable for development
+    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(debug=debug_mode)
