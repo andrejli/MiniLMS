@@ -12,6 +12,7 @@ The app currently protects lessons with shared access codes and no login. This i
 - Codes can be forwarded to anyone
 - No per-user revocation
 - No rate limiting by default
+- No brute-force protection on the access form
 - No audit trail of who accessed what
 - A leaked code must be rotated everywhere
 

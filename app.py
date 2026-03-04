@@ -117,8 +117,9 @@ def lesson_access(slug, lesson_id):
         return "Lesson not found", 404
     error_message = ""
     if request.method == "POST":
-        access_code = request.form.get("access_code", "").strip()
-        if access_code == lesson.get("hex"):
+        access_code = request.form.get("access_code", "").strip().lower()
+        expected_code = (lesson.get("hex") or "").lower()
+        if access_code == expected_code:
             return redirect(url_for("lesson_page", hex_id=access_code))
         error_message = "Wrong access code."
     return render_template(
@@ -131,6 +132,7 @@ def lesson_access(slug, lesson_id):
 
 @app.get("/lessons/<hex_id>.html")
 def lesson_page(hex_id):
+    hex_id = hex_id.lower()
     courses = get_courses()
     entry = next(
         (
