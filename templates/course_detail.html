@@ -21,7 +21,7 @@
             {% if lesson.hex %}
             <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lesson_access', slug=course.slug, lesson_id=lesson.id) }}">REQUIRE ACCESS KEY</a>
             {% else %}
-            <span class="btn-add-cart" style="display:inline-block;">COMING SOON</span>
+            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('public_lesson_page', slug=course.slug, lesson_id=lesson.id) }}">OPEN LESSON</a>
             {% endif %}
           </li>
           {% endfor %}

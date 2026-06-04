@@ -1,4 +1,6 @@
 from pathlib import Path
+import json
+import re
 
 import markdown
 from flask import Flask, redirect, render_template, request, url_for
@@ -7,11 +9,90 @@ from markupsafe import Markup
 app = Flask(__name__)
 
 CONTENT_ROOT = Path(__file__).with_name("content") / "lessons"
+ACCESS_CODES_FILE = Path(__file__).with_name("access.json")
+HEX_ACCESS_CODE_RE = re.compile(r"^[0-9a-f]{6,64}$")
 
-LESSON_HEX_ROUTES = {
-    ("python-basics", 0): "a15555",
-    ("python-basics", 1): "47a463c27f4",
-}
+
+def is_hex_access_code(value):
+    return bool(HEX_ACCESS_CODE_RE.fullmatch(value))
+
+
+def load_access_codes():
+    if not ACCESS_CODES_FILE.exists():
+        return {}
+    try:
+        payload = json.loads(ACCESS_CODES_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    normalized = {}
+    for course_slug, course_codes in payload.items():
+        if not isinstance(course_codes, dict):
+            continue
+        lesson_codes = {}
+        skeleton_keys = []
+        for lesson_id, codes in course_codes.items():
+            if lesson_id == "skeleton_keys":
+                if not isinstance(codes, list):
+                    continue
+                for code in codes:
+                    if not isinstance(code, str):
+                        continue
+                    normalized_code = code.strip().lower()
+                    if normalized_code and is_hex_access_code(normalized_code):
+                        skeleton_keys.append(normalized_code)
+                continue
+            if not isinstance(codes, list):
+                continue
+            try:
+                lesson_id_int = int(lesson_id)
+            except (TypeError, ValueError):
+                continue
+            normalized_codes = []
+            for code in codes:
+                if not isinstance(code, str):
+                    continue
+                normalized_code = code.strip().lower()
+                if normalized_code and is_hex_access_code(normalized_code):
+                    normalized_codes.append(normalized_code)
+            if normalized_codes:
+                lesson_codes[lesson_id_int] = normalized_codes
+        if lesson_codes or skeleton_keys:
+            normalized[str(course_slug)] = {
+                "skeleton_keys": skeleton_keys,
+                "lessons": lesson_codes,
+            }
+    return normalized
+
+
+def get_course_skeleton_keys(course_slug):
+    return load_access_codes().get(course_slug, {}).get("skeleton_keys", [])
+
+
+def get_lesson_access_codes(course_slug, lesson_id):
+    course_access = load_access_codes().get(course_slug, {})
+    lesson_codes = course_access.get("lessons", {}).get(lesson_id, [])
+    skeleton_keys = course_access.get("skeleton_keys", [])
+    return lesson_codes + [code for code in skeleton_keys if code not in lesson_codes]
+
+
+def is_access_code_valid_for_lesson(course_slug, lesson_id, access_code):
+    return access_code in get_lesson_access_codes(course_slug, lesson_id)
+
+
+def find_lesson_by_access_code(access_code):
+    for course_slug, course_access in load_access_codes().items():
+        lesson_codes = course_access.get("lessons", {})
+        skeleton_keys = course_access.get("skeleton_keys", [])
+        for lesson_id, codes in lesson_codes.items():
+            if access_code in codes:
+                return course_slug, lesson_id
+        if access_code in skeleton_keys:
+            for lesson_id in sorted(lesson_codes.keys()):
+                return course_slug, lesson_id
+    return None
 
 
 def list_lesson_files(course_slug):
@@ -62,7 +143,7 @@ def get_course_lessons(course_slug, course_title):
         {
             "id": item["id"],
             "title": "Summary" if item["is_summary"] else f"Lesson {item['id']}: {course_title}",
-            "hex": LESSON_HEX_ROUTES.get((course_slug, item["id"])),
+            "hex": get_lesson_access_codes(course_slug, item["id"]),
         }
         for item in lesson_files
     ]
@@ -115,12 +196,13 @@ def lesson_access(slug, lesson_id):
     lesson = next((item for item in lessons if item["id"] == lesson_id), None)
     if not lesson:
         return "Lesson not found", 404
+    if not lesson.get("hex"):
+        return redirect(url_for("public_lesson_page", slug=slug, lesson_id=lesson_id))
     error_message = ""
     if request.method == "POST":
         access_code = request.form.get("access_code", "").strip().lower()
-        expected_code = (lesson.get("hex") or "").lower()
-        if access_code == expected_code:
-            return redirect(url_for("lesson_page", hex_id=access_code))
+        if is_access_code_valid_for_lesson(slug, lesson_id, access_code):
+            return redirect(url_for("lesson_page", hex_id=access_code, slug=slug, lesson_id=lesson_id))
         error_message = "Wrong access code."
     return render_template(
         "lesson_access.html",
@@ -130,26 +212,54 @@ def lesson_access(slug, lesson_id):
     )
 
 
+@app.get("/courses/<slug>/lessons/<int:lesson_id>")
+def public_lesson_page(slug, lesson_id):
+    course = next((c for c in get_courses() if c["slug"] == slug), None)
+    if not course:
+        return "Course not found", 404
+
+    lessons = get_course_lessons(course["slug"], course["title"])
+    lesson = next((item for item in lessons if item["id"] == lesson_id), None)
+    if not lesson:
+        return "Lesson not found", 404
+
+    if lesson.get("hex"):
+        return redirect(url_for("lesson_access", slug=slug, lesson_id=lesson_id))
+
+    content_html = load_lesson_content(slug, lesson_id)
+    return render_template(
+        "lesson_page.html",
+        entry={
+            "course_slug": slug,
+            "course_title": course["title"],
+            "lesson_title": lesson["title"],
+            "lesson_id": lesson_id,
+        },
+        content_html=content_html,
+        back_link=url_for("course_detail", slug=slug),
+        back_label=f"Back to {course['title']}",
+    )
+
+
 @app.get("/lessons/<hex_id>.html")
 def lesson_page(hex_id):
     hex_id = hex_id.lower()
     courses = get_courses()
-    entry = next(
-        (
-            {
-                "course_slug": course_slug,
-                "course_title": course["title"],
-                "lesson_title": f"Lesson {lesson_id}: {course['title']}",
-                "lesson_id": lesson_id,
-            }
-            for (course_slug, lesson_id), value in LESSON_HEX_ROUTES.items()
-            if value == hex_id
-            for course in courses
-            if course["slug"] == course_slug
-        ),
-        None,
-    )
-    if not entry:
+    lesson_match = None
+
+    target_course_slug = request.args.get("slug", "").strip().lower()
+    target_lesson_id = request.args.get("lesson_id", "").strip()
+    if target_course_slug and target_lesson_id:
+        try:
+            target_lesson_id = int(target_lesson_id)
+            if is_access_code_valid_for_lesson(target_course_slug, target_lesson_id, hex_id):
+                lesson_match = (target_course_slug, target_lesson_id)
+        except ValueError:
+            lesson_match = None
+
+    if not lesson_match:
+        lesson_match = find_lesson_by_access_code(hex_id)
+    if not lesson_match:
         return render_template(
             "lesson_page.html",
             entry={
@@ -159,7 +269,23 @@ def lesson_page(hex_id):
             back_link=url_for("home"),
             back_label="Back to courses",
         ), 404
-    course = next((c for c in courses if c["slug"] == entry["course_slug"]), None)
+
+    course_slug, lesson_id = lesson_match
+    course = next((c for c in courses if c["slug"] == course_slug), None)
+    lesson_title = f"Lesson {lesson_id}"
+    if course:
+        lessons = get_course_lessons(course_slug, course["title"])
+        lesson = next((item for item in lessons if item["id"] == lesson_id), None)
+        if lesson:
+            lesson_title = lesson["title"]
+
+    entry = {
+        "course_slug": course_slug,
+        "course_title": course["title"] if course else "Restricted lesson",
+        "lesson_title": lesson_title,
+        "lesson_id": lesson_id,
+    }
+
     back_link = url_for("home")
     back_label = "Back to courses"
     if course:
