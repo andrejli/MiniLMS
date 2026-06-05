@@ -1,6 +1,7 @@
 # MiniLMS
 
-MiniLMS is a lightweight Flask-based learning platform that loads course content from Markdown files.
+MiniLMS is a lightweight Flask-based learning platform
+that loads course content from Markdown files.
 
 ## Current features
 - Course catalog generated from content folders.
@@ -47,7 +48,9 @@ Example:
 ```
 
 Notes:
-- Key format is `"course-slug" -> { "skeleton_keys": [...], "lesson_id": ["hex_code_1", "hex_code_2"] }`.
+- Key format is
+	`"course-slug" -> { "skeleton_keys": [...],`
+	`"lesson_id": ["hex_code_1", "hex_code_2"] }`.
 - Optional `skeleton_keys` are valid for every lesson in that course.
 - Every key in `access.json` must be a hex code (`[0-9a-f]`, length 6-64).
 - Lessons not listed in `access.json` are treated as public.
@@ -68,8 +71,12 @@ python -m pytest -q
 ### 2026-06-04
 - Added a free course with public lessons (`content/lessons/free-course`).
 - Added JSON-based access control via `access.json`.
-- Replaced hardcoded restricted lesson map in app logic with `access.json` lookup.
-- Added route behavior for public lessons (no key) and restricted lessons (access key flow).
-- Simplified frontend assets by removing unused cart/checkout/privacy CSS and removing `static/js/security.js`.
+- Replaced hardcoded restricted lesson map in app logic
+	with `access.json` lookup.
+- Added route behavior for public lessons (no key)
+	and restricted lessons (access key flow).
+- Simplified frontend assets by removing unused cart/checkout/privacy CSS
+	and removing `static/js/security.js`.
 - Fixed responsive CSS media-query structure and verified rendering across breakpoints.
-- Expanded test coverage for free-vs-restricted lesson flows and JSON access-code behavior.
+- Expanded test coverage for free-vs-restricted lesson flows
+	and JSON access-code behavior.

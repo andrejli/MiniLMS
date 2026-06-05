@@ -46,11 +46,12 @@ This is a strong prototype for a minimalist LMS, but it is still a prototype: cl
 - Completed: removed dead frontend features not used by templates (`security.js`, cart/checkout/privacy CSS blocks).
 - Completed: moved hard-coded access code map to `access.json` and updated app validation to read from JSON.
 - Completed: added a free course with public lessons and no key requirement.
+- Completed: added tests for error paths and content edge cases (missing lesson file, invalid lesson id, empty content).
 
 ## P0 (do next)
 1. [DONE] Fix CSS media-query brace structure and verify responsive rendering.
 2. [DONE] Remove dead CSS/JS features not used by current templates, or wire them up intentionally.
-3. Add tests for error paths and content edge cases (missing lesson file, invalid lesson id, empty content).
+3. [DONE] Add tests for error paths and content edge cases (missing lesson file, invalid lesson id, empty content).
 4. [DONE] Move hard-coded hex route map to a data file or environment-backed config.
 
 ## P1 (near-term)
