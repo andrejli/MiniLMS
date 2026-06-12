@@ -11,10 +11,13 @@
     <header>
       <h1 class="flicker">MiniLMS</h1>
       <nav>
-        <a href="{{ url_for('home') }}">Courses</a>
+        <a href="{{ url_for('core.home') }}">Courses</a>
       </nav>
     </header>
     {% block content %}{% endblock %}
+    <footer>
+      <p>Copyright 2026 FORTIS AURIS</p>
+    </footer>
   </div>
 </body>
 </html>

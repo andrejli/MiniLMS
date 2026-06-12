@@ -2,10 +2,21 @@ from pathlib import Path
 import json
 import sys
 
+import pytest
+from flask import url_for
+from werkzeug.exceptions import TooManyRequests
+from werkzeug.routing import BuildError
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import app
+
+
+@pytest.fixture(autouse=True)
+def disable_rate_limiting(monkeypatch):
+    """Keep existing tests deterministic unless a test explicitly enables throttling."""
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
 
 
 def setup_content(tmp_path):
@@ -344,3 +355,195 @@ def test_home_shows_no_courses_when_content_root_is_missing(tmp_path, monkeypatc
 
     assert response.status_code == 200
     assert b"Course Catalog" in response.data
+
+
+def test_rate_limit_blocks_6th_access_post_attempt(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+
+    client = app.app.test_client()
+    url = "/courses/python-basics/lessons/1/access"
+    for _ in range(5):
+        response = client.post(
+            url,
+            data={"access_code": "wrongcode"},
+            environ_overrides={"REMOTE_ADDR": "10.10.10.1"},
+        )
+        assert response.status_code == 200
+
+    throttled = client.post(
+        url,
+        data={"access_code": "wrongcode"},
+        environ_overrides={"REMOTE_ADDR": "10.10.10.1"},
+    )
+    assert throttled.status_code == 429
+
+
+def test_rate_limit_429_includes_retry_after_header(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+
+    client = app.app.test_client()
+    url = "/courses/python-basics/lessons/1/access"
+    for _ in range(6):
+        throttled = client.post(
+            url,
+            data={"access_code": "wrongcode"},
+            environ_overrides={"REMOTE_ADDR": "10.10.10.2"},
+        )
+
+    assert throttled.status_code == 429
+    assert throttled.headers.get("Retry-After") is not None
+
+
+def test_blueprint_endpoints_are_registered_with_namespaces():
+    endpoints = {rule.endpoint for rule in app.app.url_map.iter_rules()}
+
+    assert "core.home" in endpoints
+    assert "courses.course_detail" in endpoints
+    assert "lessons.lesson_access" in endpoints
+    assert "lessons.public_lesson_page" in endpoints
+    assert "lessons.lesson_page" in endpoints
+
+
+def test_legacy_unprefixed_endpoints_are_not_resolvable():
+    with app.app.test_request_context("/"):
+        with pytest.raises(BuildError):
+            url_for("home")
+        with pytest.raises(BuildError):
+            url_for("course_detail", slug="python-basics")
+        with pytest.raises(BuildError):
+            url_for("lesson_access", slug="python-basics", lesson_id=1)
+
+
+def test_global_429_handler_is_registered_from_core_blueprint_module():
+    handler = app.app.error_handler_spec[None][429][TooManyRequests]
+
+    assert handler.__name__ == "handle_rate_limit_exceeded"
+    assert handler.__module__ == "minilms.routes.core"
+
+
+def test_unknown_route_uses_custom_404_page():
+    client = app.app.test_client()
+
+    response = client.get("/does-not-exist")
+
+    assert response.status_code == 404
+    assert b"Page not found" in response.data
+    assert b"The page you requested does not exist." in response.data
+
+
+def test_unhandled_exception_uses_custom_500_page_without_error_leak(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    def raise_internal_error(*_args, **_kwargs):
+        raise RuntimeError("sensitive stack detail")
+
+    monkeypatch.setitem(app.app.config, "MINILMS_LOAD_LESSON_CONTENT", raise_internal_error)
+
+    client = app.app.test_client()
+    response = client.get("/courses/free-course/lessons/1")
+
+    assert response.status_code == 500
+    assert b"Something went wrong" in response.data
+    assert b"An unexpected error occurred." in response.data
+    assert b"sensitive stack detail" not in response.data
+
+
+def test_valid_access_code_succeeds_under_threshold_with_rate_limit_enabled(
+    tmp_path,
+    monkeypatch,
+):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+
+    client = app.app.test_client()
+    response = client.post(
+        "/courses/python-basics/lessons/1/access",
+        data={"access_code": "47a463c27f4"},
+        environ_overrides={"REMOTE_ADDR": "10.10.10.3"},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].startswith("/lessons/47a463c27f4.html")
+
+
+def test_rate_limits_are_separate_for_different_ips(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+
+    client = app.app.test_client()
+    url = "/courses/python-basics/lessons/1/access"
+    for _ in range(6):
+        first_ip = client.post(
+            url,
+            data={"access_code": "wrongcode"},
+            environ_overrides={"REMOTE_ADDR": "10.10.10.4"},
+        )
+
+    second_ip = client.post(
+        url,
+        data={"access_code": "wrongcode"},
+        environ_overrides={"REMOTE_ADDR": "10.10.10.5"},
+    )
+
+    assert first_ip.status_code == 429
+    assert second_ip.status_code == 200
+
+
+def test_security_headers_are_applied_on_html_responses(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers.get("Content-Security-Policy") is not None
+    assert response.headers.get("X-Frame-Options") == "SAMEORIGIN"
+    assert response.headers.get("X-Content-Type-Options") == "nosniff"
+    assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+    assert response.headers.get("X-XSS-Protection") == "1; mode=block"
+
+
+def test_hsts_header_is_added_when_request_is_https(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+    response = client.get("/", environ_overrides={"HTTP_X_FORWARDED_PROTO": "https"})
+
+    assert response.status_code == 200
+    assert response.headers.get("Strict-Transport-Security") is not None
+
+
+def test_force_https_redirect_when_enabled(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+    monkeypatch.setenv("FORCE_HTTPS", "true")
+
+    client = app.app.test_client()
+    response = client.get("/")
+
+    assert response.status_code == 308
+    assert response.headers["Location"].startswith("https://")

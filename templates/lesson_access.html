@@ -2,7 +2,7 @@
 {% block content %}
 <section class="product-detail">
   <div class="product-detail-header">
-    <a class="back-button" href="{{ url_for('course_detail', slug=course.slug) }}">Back to course</a>
+    <a class="back-button" href="{{ url_for('courses.course_detail', slug=course.slug) }}">Back to course</a>
     <div class="product-detail-category">{{ course.category }}</div>
     <h2 class="product-detail-name">{{ lesson.title }}</h2>
   </div>

@@ -2,7 +2,7 @@
 {% block content %}
 <section class="product-detail">
   <div class="product-detail-header">
-    <a class="back-button" href="{{ url_for('home') }}">Back to courses</a>
+    <a class="back-button" href="{{ url_for('core.home') }}">Back to courses</a>
     <div class="product-detail-category">{{ course.category }}</div>
     <h2 class="product-detail-name">{{ course.title }}</h2>
   </div>
@@ -19,9 +19,9 @@
           <li>
             <div class="product-detail-description">{{ lesson.title }}</div>
             {% if lesson.hex %}
-            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lesson_access', slug=course.slug, lesson_id=lesson.id) }}">REQUIRE ACCESS KEY</a>
+            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lessons.lesson_access', slug=course.slug, lesson_id=lesson.id) }}">REQUIRE ACCESS KEY</a>
             {% else %}
-            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('public_lesson_page', slug=course.slug, lesson_id=lesson.id) }}">OPEN LESSON</a>
+            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lessons.public_lesson_page', slug=course.slug, lesson_id=lesson.id) }}">OPEN LESSON</a>
             {% endif %}
           </li>
           {% endfor %}

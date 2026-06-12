@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="product-detail">
+  <div class="product-detail-header">
+    <a class="back-button" href="{{ url_for('core.home') }}">Back to courses</a>
+    <div class="product-detail-category">Error</div>
+    <h2 class="product-detail-name">Page not found</h2>
+  </div>
+  <div class="product-detail-content">
+    <div class="product-detail-info">
+      <div class="product-detail-section">
+        <h3>404</h3>
+        <p class="product-detail-description">The page you requested does not exist.</p>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

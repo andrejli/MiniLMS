@@ -1,6 +1,6 @@
 # NEXT: Repository Analysis and Opinion
 
-Date: 2026-06-04
+Date: 2026-06-10
 
 ## Opinion in one line
 This is a strong prototype for a minimalist LMS, but it is still a prototype: clear and easy to extend, yet missing production-level security boundaries and structural separation.
@@ -16,7 +16,8 @@ This is a strong prototype for a minimalist LMS, but it is still a prototype: cl
 
 ### 1) Access control is obfuscation, not authorization
 - Lesson access relies on shared static hex codes.
-- Codes are reusable and transferable; no user binding, expiry, rate limiting, or audit trail.
+- Codes are reusable and transferable; no user binding, expiry, or audit trail.
+- Status: baseline application-level rate limiting is implemented for global traffic and access-code POST attempts.
 - Suitable for demos or low-risk content, not suitable for paid/private learning content.
 
 ### 2) Monolithic backend file
@@ -37,7 +38,7 @@ This is a strong prototype for a minimalist LMS, but it is still a prototype: cl
   - malformed markdown or missing lesson files
   - unknown course/lesson access pages in detail
   - HTML escaping/sanitization expectations
-  - security boundaries (brute force/rate limiting behavior)
+  - distributed production behavior (multi-worker + Redis-backed limiter verification)
 
 ## Priority roadmap
 
@@ -47,6 +48,8 @@ This is a strong prototype for a minimalist LMS, but it is still a prototype: cl
 - Completed: moved hard-coded access code map to `access.json` and updated app validation to read from JSON.
 - Completed: added a free course with public lessons and no key requirement.
 - Completed: added tests for error paths and content edge cases (missing lesson file, invalid lesson id, empty content).
+- Completed: implemented Flask-Limiter policy with global limits (120/hour, 30/minute) and stricter access POST limits (5/minute, 20/hour), including centralized 429 handling and Retry-After guidance.
+- Completed: added integration tests for throttle behavior, retry header, successful requests under threshold, and per-IP counter separation.
 
 ## P0 (do next)
 1. [DONE] Fix CSS media-query brace structure and verify responsive rendering.
@@ -62,12 +65,13 @@ This is a strong prototype for a minimalist LMS, but it is still a prototype: cl
 2. Add a minimal app factory pattern for easier testing and future config profiles.
 3. Add basic request logging and explicit error handlers for 404/500 templates.
 4. Tighten dependency pinning (direct runtime deps explicit in requirements).
+5. Validate proxy trust chain and Redis-backed limiter behavior in staging (multi-worker scenario).
 
 ## P2 (if aiming for real users)
 1. Replace shared access codes with one-time or user-bound tokens.
-2. Add rate limiting on access endpoint.
-3. Add simple audit logging (token usage, timestamp, source IP).
-4. Add basic identity (email magic link or lightweight auth).
+2. Add simple audit logging (token usage, timestamp, source IP).
+3. Add basic identity (email magic link or lightweight auth).
+4. Add edge-layer controls (reverse proxy or WAF limits) for defense in depth.
 
 ## Suggested architecture direction
 - Keep markdown file-based lessons (good constraint).
