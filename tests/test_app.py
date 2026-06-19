@@ -100,11 +100,9 @@ def test_access_flow_and_rendered_lesson(tmp_path, monkeypatch):
         data={"access_code": "47a463c27f4"},
     )
     assert response.status_code == 302
-    assert response.headers["Location"].startswith("/lessons/47a463c27f4.html")
-    assert "slug=python-basics" in response.headers["Location"]
-    assert "lesson_id=1" in response.headers["Location"]
+    assert response.headers["Location"] == "/courses/python-basics/lessons/1"
 
-    lesson_response = client.get("/lessons/47a463c27f4.html")
+    lesson_response = client.get("/courses/python-basics/lessons/1")
     assert lesson_response.status_code == 200
     assert b"<strong>Bold</strong>" in lesson_response.data
 
@@ -176,8 +174,7 @@ def test_summary_lesson_can_be_restricted_via_access_json(tmp_path, monkeypatch)
         data={"access_code": "a15555"},
     )
     assert unlocked.status_code == 302
-    assert unlocked.headers["Location"].startswith("/lessons/a15555.html")
-    assert "lesson_id=0" in unlocked.headers["Location"]
+    assert unlocked.headers["Location"] == "/courses/python-basics/lessons/0"
 
 
 def test_any_code_in_lesson_code_list_unlocks_lesson(tmp_path, monkeypatch):
@@ -196,8 +193,7 @@ def test_any_code_in_lesson_code_list_unlocks_lesson(tmp_path, monkeypatch):
         data={"access_code": "abc123"},
     )
     assert response.status_code == 302
-    assert response.headers["Location"].startswith("/lessons/abc123.html")
-    assert "lesson_id=1" in response.headers["Location"]
+    assert response.headers["Location"] == "/courses/python-basics/lessons/1"
 
 
 def test_skeleton_key_unlocks_multiple_lessons(tmp_path, monkeypatch):
@@ -222,16 +218,11 @@ def test_skeleton_key_unlocks_multiple_lessons(tmp_path, monkeypatch):
         data={"access_code": "c0ffee"},
     )
     assert lesson0.status_code == 302
-    assert lesson0.headers["Location"].startswith("/lessons/c0ffee.html")
-    assert "lesson_id=0" in lesson0.headers["Location"]
+    assert lesson0.headers["Location"] == "/courses/python-basics/lessons/0"
 
-    lesson1 = client.post(
-        "/courses/python-basics/lessons/1/access",
-        data={"access_code": "c0ffee"},
-    )
-    assert lesson1.status_code == 302
-    assert lesson1.headers["Location"].startswith("/lessons/c0ffee.html")
-    assert "lesson_id=1" in lesson1.headers["Location"]
+    lesson1 = client.get("/courses/python-basics/lessons/1")
+    assert lesson1.status_code == 200
+    assert b"<strong>Bold</strong>" in lesson1.data
 
 
 def test_skeleton_key_does_not_restrict_unlisted_summary(tmp_path, monkeypatch):
@@ -289,7 +280,7 @@ def test_missing_lesson_file_returns_unavailable_content_message(tmp_path, monke
     (content_root / "python-basics" / "lesson-1.md").unlink()
 
     client = app.app.test_client()
-    response = client.get("/lessons/47a463c27f4.html")
+    response = client.get("/lessons/47a463c27f4.html", follow_redirects=True)
 
     assert response.status_code == 200
     assert b"Content is not available yet." in response.data
@@ -408,8 +399,8 @@ def test_blueprint_endpoints_are_registered_with_namespaces():
     assert "core.home" in endpoints
     assert "courses.course_detail" in endpoints
     assert "lessons.lesson_access" in endpoints
-    assert "lessons.public_lesson_page" in endpoints
     assert "lessons.lesson_page" in endpoints
+    assert "lessons.legacy_lesson_page" in endpoints
 
 
 def test_legacy_unprefixed_endpoints_are_not_resolvable():
@@ -476,7 +467,7 @@ def test_valid_access_code_succeeds_under_threshold_with_rate_limit_enabled(
         environ_overrides={"REMOTE_ADDR": "10.10.10.3"},
     )
     assert response.status_code == 302
-    assert response.headers["Location"].startswith("/lessons/47a463c27f4.html")
+    assert response.headers["Location"] == "/courses/python-basics/lessons/1"
 
 
 def test_rate_limits_are_separate_for_different_ips(tmp_path, monkeypatch):
@@ -547,3 +538,117 @@ def test_force_https_redirect_when_enabled(tmp_path, monkeypatch):
 
     assert response.status_code == 308
     assert response.headers["Location"].startswith("https://")
+
+
+def test_session_persists_unlock_across_requests(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+    
+    # 1. Access code entry redirects to clean URL
+    response = client.post(
+        "/courses/python-basics/lessons/1/access",
+        data={"access_code": "47a463c27f4"},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/courses/python-basics/lessons/1"
+
+    # 2. Accessing the clean URL works directly
+    lesson_response = client.get("/courses/python-basics/lessons/1")
+    assert lesson_response.status_code == 200
+    assert b"<strong>Bold</strong>" in lesson_response.data
+
+    # 3. Requesting the lesson page again (without entering a code again) still works (session is persisted)
+    lesson_response2 = client.get("/courses/python-basics/lessons/1")
+    assert lesson_response2.status_code == 200
+
+
+def test_locked_lesson_redirects_to_access_form(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+    
+    # Locked lesson without session redirects to /access page
+    response = client.get("/courses/python-basics/lessons/1")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/courses/python-basics/lessons/1/access")
+
+
+def test_legacy_hex_url_redirects_and_grants_session(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+    
+    # Access legacy hex URL -> redirects with 308 to clean URL and unlocks session
+    response = client.get("/lessons/47a463c27f4.html?slug=python-basics&lesson_id=1")
+    assert response.status_code == 308
+    assert response.headers["Location"] == "/courses/python-basics/lessons/1"
+
+    # Following the redirect should load the content successfully (as session is unlocked)
+    lesson_response = client.get("/courses/python-basics/lessons/1")
+    assert lesson_response.status_code == 200
+    assert b"<strong>Bold</strong>" in lesson_response.data
+
+
+def test_session_does_not_leak_across_courses(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(
+        tmp_path,
+        payload={
+            "python-basics": {"1": ["47a463c27f4"]},
+            "it_sec": {"1": ["a1b2c3"]}
+        }
+    )
+    # Add an empty lesson file for it_sec
+    it_sec_dir = content_root / "it_sec"
+    it_sec_dir.mkdir(parents=True, exist_ok=True)
+    (it_sec_dir / "lesson-1.md").write_text("# IT Sec Lesson 1", encoding="utf-8")
+
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+    
+    # Unlock python-basics lesson 1
+    client.post(
+        "/courses/python-basics/lessons/1/access",
+        data={"access_code": "47a463c27f4"},
+    )
+    
+    # Check it_sec lesson 1 is still locked
+    response = client.get("/courses/it_sec/lessons/1")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/courses/it_sec/lessons/1/access")
+
+
+def test_unlocked_set_in_template(tmp_path, monkeypatch):
+    content_root = setup_content(tmp_path)
+    access_file = setup_access_codes(tmp_path)
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+    
+    # 1. Initially detail page says REQUIRE ACCESS KEY
+    detail_pre = client.get("/courses/python-basics")
+    assert b"REQUIRE ACCESS KEY" in detail_pre.data
+    assert b"VIEW LESSON" not in detail_pre.data
+
+    # 2. Unlock the lesson
+    client.post(
+        "/courses/python-basics/lessons/1/access",
+        data={"access_code": "47a463c27f4"},
+    )
+    
+    # 3. Now course detail shows VIEW LESSON
+    detail_post = client.get("/courses/python-basics")
+    assert b"VIEW LESSON" in detail_post.data

@@ -7,18 +7,20 @@ that loads course content from Markdown files.
 - Course catalog generated from content folders.
 - Public lessons (no key required).
 - Restricted lessons protected by hex access codes.
+- Session-based authorization (using `Flask-Session` server-side filesystem backend) to prevent secrets from leaking in URLs.
 - Access codes stored in JSON (`access.json`) instead of hardcoded values.
 - Security headers (CSP, HSTS on HTTPS, frame/mime/referrer/XSS protections).
 - Responsive PIP-Boy themed UI.
 
 ## Project structure
-- `app.py`: Flask app and routing.
+- `app.py`: Flask app entry point, configuration, and Session bootstrap.
 - `content/lessons/`: Course and lesson Markdown files.
 - `templates/`: Jinja templates.
 - `static/css/style.css`: UI styles.
-- `minilms/`: Modular backend components (routes, access control, content service, security headers).
+- `minilms/`: Modular backend components (routes, access control, content service, security headers, session manager).
+- `minilms/session_manager.py`: Session-based unlock state helpers.
 - `access.json`: Restricted lesson access codes.
-- `tests/test_app.py`: Functional tests.
+- `tests/test_app.py`: Functional and integration tests.
 
 ## Run locally
 1. Create and activate a virtual environment.
@@ -88,6 +90,14 @@ Environment keys:
 Throttled requests return HTTP `429` with retry guidance and a `Retry-After` header.
 
 ## Changelog
+
+### 2026-06-19
+- Implemented session-based access control using `Flask-Session` with a filesystem storage backend, replacing the insecure raw hex key URL redirect pattern.
+- Eliminated hex keys from URLs in favor of clean routing (`/courses/<slug>/lessons/<lesson_id>`).
+- Added a backward-compatibility 308 Permanent Redirect shim for legacy `/lessons/<hex_id>.html` URLs to dynamically unlock sessions and route to clean paths.
+- Resolved e-commerce copy-paste visual bug on the course catalog cards by replacing `.product-stock` with `.course-level` and removing the leftover `[QTY: ...]` text decorations from the UI.
+- Appended `flask_session/` storage directory to `.gitignore`.
+- Updated the functional test suite and added 5 new integration tests verifying session state persistence, locked redirections, legacy URL shims, and multi-course permission isolation.
 
 ### 2026-06-10
 - Implemented Flask-Limiter-based rate limiting with environment-driven configuration.

@@ -1,11 +1,11 @@
-"""MiniLMS Flask application entrypoint and composition layer."""
-
+from datetime import timedelta
 from pathlib import Path
 import os
 
 from flask import Flask, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_session import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from minilms import access_control
@@ -14,6 +14,25 @@ from minilms.routes import register_blueprints
 from minilms.security_headers import env_flag, register_security_middleware
 
 app = Flask(__name__)
+
+# Configure session handling
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
+app.config["SESSION_TYPE"] = os.getenv("SESSION_TYPE", "filesystem")
+app.config["SESSION_FILE_DIR"] = os.getenv(
+    "SESSION_FILE_DIR",
+    str(Path(app.instance_path) / "flask_session") if hasattr(app, "instance_path") else str(Path(__file__).parent / "flask_session"),
+)
+app.config["SESSION_PERMANENT"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
+app.config["SESSION_USE_SIGNER"] = True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+# Ensure the session folder exists
+os.makedirs(app.config["SESSION_FILE_DIR"], exist_ok=True)
+
+# Initialize Session
+Session(app)
 
 CONTENT_ROOT = Path(__file__).with_name("content") / "lessons"
 ACCESS_CODES_FILE = Path(__file__).with_name("access.json")
@@ -135,6 +154,7 @@ register_blueprints(
     is_access_code_valid_for_lesson=is_access_code_valid_for_lesson,
     find_lesson_by_access_code=find_lesson_by_access_code,
     load_lesson_content=load_lesson_content,
+    get_course_skeleton_keys=get_course_skeleton_keys,
 )
 
 

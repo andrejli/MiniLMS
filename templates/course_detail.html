@@ -19,9 +19,13 @@
           <li>
             <div class="product-detail-description">{{ lesson.title }}</div>
             {% if lesson.hex %}
-            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lessons.lesson_access', slug=course.slug, lesson_id=lesson.id) }}">REQUIRE ACCESS KEY</a>
+              {% if lesson.id in unlocked_lessons %}
+              <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lessons.lesson_page', slug=course.slug, lesson_id=lesson.id) }}">VIEW LESSON</a>
+              {% else %}
+              <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lessons.lesson_access', slug=course.slug, lesson_id=lesson.id) }}">REQUIRE ACCESS KEY</a>
+              {% endif %}
             {% else %}
-            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lessons.public_lesson_page', slug=course.slug, lesson_id=lesson.id) }}">OPEN LESSON</a>
+            <a class="btn-add-cart" style="text-decoration:none;display:inline-block;" href="{{ url_for('lessons.lesson_page', slug=course.slug, lesson_id=lesson.id) }}">OPEN LESSON</a>
             {% endif %}
           </li>
           {% endfor %}

@@ -236,17 +236,17 @@ nav a:hover {
     opacity: 0.8;
 }
 
-.product-stock {
+.course-level {
     color: var(--pip-dark-green);
     font-size: 1rem;
     opacity: 0.7;
 }
 
-.product-stock::before {
-    content: "[QTY: ";
+.course-level::before {
+    content: "[";
 }
 
-.product-stock::after {
+.course-level::after {
     content: "]";
 }
 

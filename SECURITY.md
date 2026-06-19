@@ -12,7 +12,7 @@ The current application is a prototype that utilizes **obfuscation rather than r
 | Category | Finding | Impact | Status |
 | :--- | :--- | :--- | :--- |
 | **Authentication** | Shared static hex codes. Transferable and leak-prone. | **High** | ⚠️ Known Risk |
-| **Session Mgmt** | Access granted via URL (`/lessons/<hex_id>.html`). Easily cached/indexed. | **Medium** | ⚠️ Known Risk |
+| **Session Mgmt** | Session-based lock verification using Flask-Session. | **Low** | ✅ Implemented |
 | **Rate Limiting** | Flask-Limiter enforced globally and with strict policy on `/access` POST (5/minute, 20/hour per IP+route). | **Medium** | ✅ Implemented |
 | **Content Security** | Filesystem reads based on slugs. | **Low** | ✅ Validated |
 | **XSS** | Security headers enforced (CSP + frame/mime/referrer/XSS response headers); markdown sanitization still pending. | **Medium** | ⚠️ Partially Mitigated |
@@ -35,7 +35,7 @@ Rate limiting implementation details (2026-06-10):
 *   **Error Handling**: ✅ Implemented custom 404/500 pages to avoid leaking system internals.
 
 ### Phase 2: User Persistence (Short-term)
-*   **Session-based Access**: Use `Flask-Session` to store "unlocked" state in secure cookies rather than exposing keys in URLs.
+*   **Session-based Access**: ✅ Implemented via `Flask-Session` filesystem backend, protecting keys from URL exposure.
 *   **Database Migration**: Move `access.json` to SQLite for concurrency and audit logging.
 *   **Sanitization**: Implement `bleach` to sanitize Markdown-to-HTML output.
 

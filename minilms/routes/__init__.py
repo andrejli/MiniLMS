@@ -16,6 +16,7 @@ def register_blueprints(
     is_access_code_valid_for_lesson,
     find_lesson_by_access_code,
     load_lesson_content,
+    get_course_skeleton_keys,
 ):
     """Register all route blueprints and service bindings."""
     app.config["MINILMS_GET_COURSES"] = get_courses
@@ -23,6 +24,7 @@ def register_blueprints(
     app.config["MINILMS_IS_ACCESS_CODE_VALID_FOR_LESSON"] = is_access_code_valid_for_lesson
     app.config["MINILMS_FIND_LESSON_BY_ACCESS_CODE"] = find_lesson_by_access_code
     app.config["MINILMS_LOAD_LESSON_CONTENT"] = load_lesson_content
+    app.config["MINILMS_GET_COURSE_SKELETON_KEYS"] = get_course_skeleton_keys
 
     app.register_blueprint(core_bp)
     app.register_blueprint(course_bp)

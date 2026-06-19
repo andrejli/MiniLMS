@@ -2,6 +2,8 @@
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
 
+from minilms import session_manager
+
 
 def _get_courses():
     return current_app.config["MINILMS_GET_COURSES"]()
@@ -55,7 +57,7 @@ def create_lesson_blueprint(
         if not lesson.get("hex"):
             return redirect(
                 url_for(
-                    "lessons.public_lesson_page",
+                    "lessons.lesson_page",
                     slug=slug,
                     lesson_id=lesson_id,
                 )
@@ -65,10 +67,20 @@ def create_lesson_blueprint(
         if request.method == "POST":
             access_code = request.form.get("access_code", "").strip().lower()
             if _is_access_code_valid_for_lesson(slug, lesson_id, access_code):
+                # Retrieve course lessons to get all IDs (needed for skeleton unlock)
+                lesson_files = _get_course_lessons(slug, course["title"])
+                lesson_ids = [item["id"] for item in lesson_files]
+                
+                # Check if it is a skeleton key
+                skeleton_keys = current_app.config["MINILMS_GET_COURSE_SKELETON_KEYS"](slug)
+                if access_code in skeleton_keys:
+                    session_manager.grant_skeleton_unlock(slug, lesson_ids)
+                else:
+                    session_manager.grant_unlock(slug, lesson_id)
+                
                 return redirect(
                     url_for(
                         "lessons.lesson_page",
-                        hex_id=access_code,
                         slug=slug,
                         lesson_id=lesson_id,
                     )
@@ -83,18 +95,33 @@ def create_lesson_blueprint(
         )
 
     @lesson_bp.get("/courses/<slug>/lessons/<int:lesson_id>")
-    def public_lesson_page(slug, lesson_id):
+    def lesson_page(slug, lesson_id):
         course = next((course for course in _get_courses() if course["slug"] == slug), None)
         if not course:
             return "Course not found", 404
 
         lessons = _get_course_lessons(course["slug"], course["title"])
         lesson = next((item for item in lessons if item["id"] == lesson_id), None)
-        if not lesson:
-            return "Lesson not found", 404
 
-        if lesson.get("hex"):
-            return redirect(url_for("lessons.lesson_access", slug=slug, lesson_id=lesson_id))
+        # Check if the lesson requires access
+        has_hex = False
+        lesson_title = f"Lesson {lesson_id}"
+        if lesson:
+            has_hex = bool(lesson.get("hex"))
+            lesson_title = lesson["title"]
+        else:
+            # File is missing. Check access.json to see if it was restricted
+            from pathlib import Path
+            from minilms.access_control import get_lesson_access_codes
+            access_file = Path(__file__).parents[2] / "access.json"
+            has_hex = bool(get_lesson_access_codes(access_file, slug, lesson_id))
+
+        if has_hex:
+            if not session_manager.is_unlocked(slug, lesson_id):
+                return redirect(url_for("lessons.lesson_access", slug=slug, lesson_id=lesson_id))
+        else:
+            if not lesson:
+                return "Lesson not found", 404
 
         content_html = _load_lesson_content(slug, lesson_id)
         return render_template(
@@ -102,7 +129,7 @@ def create_lesson_blueprint(
             entry={
                 "course_slug": slug,
                 "course_title": course["title"],
-                "lesson_title": lesson["title"],
+                "lesson_title": lesson_title,
                 "lesson_id": lesson_id,
             },
             content_html=content_html,
@@ -111,9 +138,8 @@ def create_lesson_blueprint(
         )
 
     @lesson_bp.get("/lessons/<hex_id>.html")
-    def lesson_page(hex_id):
+    def legacy_lesson_page(hex_id):
         hex_id = hex_id.lower()
-        courses = _get_courses()
         lesson_match = None
 
         target_course_slug = request.args.get("slug", "").strip().lower()
@@ -143,34 +169,23 @@ def create_lesson_blueprint(
             )
 
         course_slug, lesson_id = lesson_match
-        course = next((item for item in courses if item["slug"] == course_slug), None)
-        lesson_title = f"Lesson {lesson_id}"
-        if course:
-            lessons = _get_course_lessons(course_slug, course["title"])
-            lesson = next((item for item in lessons if item["id"] == lesson_id), None)
-            if lesson:
-                lesson_title = lesson["title"]
+        course = next((item for item in _get_courses() if item["slug"] == course_slug), None)
+        
+        # Grant session unlock (same as POST handler)
+        lesson_files = _get_course_lessons(course_slug, course["title"] if course else "")
+        lesson_ids = [item["id"] for item in lesson_files]
+        skeleton_keys = current_app.config["MINILMS_GET_COURSE_SKELETON_KEYS"](course_slug)
+        
+        if hex_id in skeleton_keys:
+            session_manager.grant_skeleton_unlock(course_slug, lesson_ids)
+        else:
+            session_manager.grant_unlock(course_slug, lesson_id)
 
-        entry = {
-            "course_slug": course_slug,
-            "course_title": course["title"] if course else "Restricted lesson",
-            "lesson_title": lesson_title,
-            "lesson_id": lesson_id,
-        }
+        current_app.logger.warning("legacy hex-code URL accessed: %s. Redirecting to session-based URL.", hex_id)
 
-        back_link = url_for("core.home")
-        back_label = "Back to courses"
-        if course:
-            back_link = url_for("courses.course_detail", slug=course["slug"])
-            back_label = f"Back to {course['title']}"
-
-        content_html = _load_lesson_content(entry["course_slug"], entry["lesson_id"])
-        return render_template(
-            "lesson_page.html",
-            entry=entry,
-            content_html=content_html,
-            back_link=back_link,
-            back_label=back_label,
+        return redirect(
+            url_for("lessons.lesson_page", slug=course_slug, lesson_id=lesson_id),
+            code=308,
         )
 
     return lesson_bp
