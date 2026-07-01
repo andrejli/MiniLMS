@@ -439,7 +439,7 @@ def test_unhandled_exception_uses_custom_500_page_without_error_leak(tmp_path, m
     def raise_internal_error(*_args, **_kwargs):
         raise RuntimeError("sensitive stack detail")
 
-    monkeypatch.setitem(app.app.config, "MINILMS_LOAD_LESSON_CONTENT", raise_internal_error)
+    monkeypatch.setattr(app, "load_lesson_content", raise_internal_error)
 
     client = app.app.test_client()
     response = client.get("/courses/free-course/lessons/1")
@@ -652,3 +652,35 @@ def test_unlocked_set_in_template(tmp_path, monkeypatch):
     # 3. Now course detail shows VIEW LESSON
     detail_post = client.get("/courses/python-basics")
     assert b"VIEW LESSON" in detail_post.data
+
+
+def test_hashed_access_code(tmp_path, monkeypatch):
+    from minilms.access_control import hash_access_code
+    
+    content_root = setup_content(tmp_path)
+    hashed_key = hash_access_code("secretkey")
+    access_file = setup_access_codes(
+        tmp_path,
+        payload={"python-basics": {"1": [hashed_key]}}
+    )
+    monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
+    monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
+
+    client = app.app.test_client()
+
+    # Wrong code should fail
+    response_fail = client.post(
+        "/courses/python-basics/lessons/1/access",
+        data={"access_code": "wrongkey"},
+    )
+    assert response_fail.status_code == 200
+    assert b"Wrong access code." in response_fail.data
+
+    # Correct code should succeed
+    response_success = client.post(
+        "/courses/python-basics/lessons/1/access",
+        data={"access_code": "secretkey"},
+    )
+    assert response_success.status_code == 302
+    assert response_success.headers["Location"] == "/courses/python-basics/lessons/1"
+

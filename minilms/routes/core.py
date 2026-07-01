@@ -8,7 +8,8 @@ core_bp = Blueprint("core", __name__)
 
 
 def _get_courses():
-    return current_app.config["MINILMS_GET_COURSES"]()
+    import app
+    return app.get_courses()
 
 
 @core_bp.get("/")

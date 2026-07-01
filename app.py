@@ -2,6 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 import os
 
+from cachelib import FileSystemCache
 from flask import Flask, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -17,19 +18,23 @@ app = Flask(__name__)
 
 # Configure session handling
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
-app.config["SESSION_TYPE"] = os.getenv("SESSION_TYPE", "filesystem")
-app.config["SESSION_FILE_DIR"] = os.getenv(
+
+session_dir = os.getenv(
     "SESSION_FILE_DIR",
     str(Path(app.instance_path) / "flask_session") if hasattr(app, "instance_path") else str(Path(__file__).parent / "flask_session"),
 )
+os.makedirs(session_dir, exist_ok=True)
+
+app.config["SESSION_TYPE"] = os.getenv("SESSION_TYPE", "cachelib")
+app.config["SESSION_CACHELIB"] = FileSystemCache(
+    cache_dir=session_dir,
+    threshold=500,
+    mode=0o600,
+)
 app.config["SESSION_PERMANENT"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
-app.config["SESSION_USE_SIGNER"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-
-# Ensure the session folder exists
-os.makedirs(app.config["SESSION_FILE_DIR"], exist_ok=True)
 
 # Initialize Session
 Session(app)
@@ -149,12 +154,6 @@ register_blueprints(
     access_post_limit=f"{RATE_LIMIT_ACCESS_POST_MINUTE};{RATE_LIMIT_ACCESS_POST_HOURLY}",
     limit_key_func=limit_key_ip_plus_route,
     exempt_limiter=lambda: not rate_limit_enabled(),
-    get_courses=get_courses,
-    get_course_lessons=get_course_lessons,
-    is_access_code_valid_for_lesson=is_access_code_valid_for_lesson,
-    find_lesson_by_access_code=find_lesson_by_access_code,
-    load_lesson_content=load_lesson_content,
-    get_course_skeleton_keys=get_course_skeleton_keys,
 )
 
 

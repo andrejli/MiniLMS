@@ -7,11 +7,13 @@ course_bp = Blueprint("courses", __name__)
 
 
 def _get_courses():
-    return current_app.config["MINILMS_GET_COURSES"]()
+    import app
+    return app.get_courses()
 
 
 def _get_course_lessons(course_slug, course_title):
-    return current_app.config["MINILMS_GET_COURSE_LESSONS"](course_slug, course_title)
+    import app
+    return app.get_course_lessons(course_slug, course_title)
 
 
 @course_bp.get("/courses/<slug>")

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+from functools import lru_cache
 
 import markdown
 from markupsafe import Markup
@@ -9,12 +10,10 @@ from markupsafe import Markup
 LESSON_FILENAME_RE = re.compile(r"(?:lesson|session)-?(\d+)")
 
 
-def list_lesson_files(content_root, course_slug):
-    """Discover and normalize lesson markdown files for one course."""
-    course_dir = Path(content_root) / course_slug
-    if not course_dir.exists():
-        return []
-
+@lru_cache(maxsize=64)
+def _list_lesson_files_cached(course_dir_str, dir_mtime):
+    """Discover and normalize lesson markdown files, caching result based on mtime."""
+    course_dir = Path(course_dir_str)
     lessons = []
     for path in course_dir.glob("*.md"):
         stem = path.stem.strip()
@@ -29,6 +28,18 @@ def list_lesson_files(content_root, course_slug):
         lessons.append({"id": lesson_id, "path": path, "is_summary": False})
 
     return sorted(lessons, key=lambda item: item["id"])
+
+
+def list_lesson_files(content_root, course_slug):
+    """Discover and normalize lesson markdown files for one course."""
+    course_dir = Path(content_root) / course_slug
+    if not course_dir.exists():
+        return []
+    try:
+        dir_mtime = course_dir.stat().st_mtime
+    except OSError:
+        dir_mtime = 0.0
+    return _list_lesson_files_cached(str(course_dir), dir_mtime)
 
 
 def get_courses(content_root):
@@ -84,6 +95,13 @@ def find_course_by_label(content_root, label):
     return None
 
 
+@lru_cache(maxsize=128)
+def _render_markdown(path_str, mtime):
+    """Render markdown file to HTML, cached based on mtime."""
+    text = Path(path_str).read_text(encoding="utf-8")
+    return markdown.markdown(text, extensions=["fenced_code", "tables"])
+
+
 def load_lesson_content(content_root, course_slug, lesson_id):
     """Load lesson markdown and convert it to HTML markup."""
     lesson_files = list_lesson_files(content_root, course_slug)
@@ -91,6 +109,11 @@ def load_lesson_content(content_root, course_slug, lesson_id):
     if not match:
         return None
 
-    text = match["path"].read_text(encoding="utf-8")
-    html = markdown.markdown(text, extensions=["fenced_code", "tables"])
+    path = match["path"]
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+
+    html = _render_markdown(str(path), mtime)
     return Markup(html)

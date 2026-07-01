@@ -6,15 +6,18 @@ from minilms import session_manager
 
 
 def _get_courses():
-    return current_app.config["MINILMS_GET_COURSES"]()
+    import app
+    return app.get_courses()
 
 
 def _get_course_lessons(course_slug, course_title):
-    return current_app.config["MINILMS_GET_COURSE_LESSONS"](course_slug, course_title)
+    import app
+    return app.get_course_lessons(course_slug, course_title)
 
 
 def _is_access_code_valid_for_lesson(course_slug, lesson_id, access_code):
-    return current_app.config["MINILMS_IS_ACCESS_CODE_VALID_FOR_LESSON"](
+    import app
+    return app.is_access_code_valid_for_lesson(
         course_slug,
         lesson_id,
         access_code,
@@ -22,11 +25,18 @@ def _is_access_code_valid_for_lesson(course_slug, lesson_id, access_code):
 
 
 def _find_lesson_by_access_code(access_code):
-    return current_app.config["MINILMS_FIND_LESSON_BY_ACCESS_CODE"](access_code)
+    import app
+    return app.find_lesson_by_access_code(access_code)
 
 
 def _load_lesson_content(course_slug, lesson_id):
-    return current_app.config["MINILMS_LOAD_LESSON_CONTENT"](course_slug, lesson_id)
+    import app
+    return app.load_lesson_content(course_slug, lesson_id)
+
+
+def _get_course_skeleton_keys(course_slug):
+    import app
+    return app.get_course_skeleton_keys(course_slug)
 
 
 def create_lesson_blueprint(
@@ -72,8 +82,10 @@ def create_lesson_blueprint(
                 lesson_ids = [item["id"] for item in lesson_files]
                 
                 # Check if it is a skeleton key
-                skeleton_keys = current_app.config["MINILMS_GET_COURSE_SKELETON_KEYS"](slug)
-                if access_code in skeleton_keys:
+                from minilms.access_control import verify_access_code
+                skeleton_keys = _get_course_skeleton_keys(slug)
+                is_skeleton = any(verify_access_code(access_code, key) for key in skeleton_keys)
+                if is_skeleton:
                     session_manager.grant_skeleton_unlock(slug, lesson_ids)
                 else:
                     session_manager.grant_unlock(slug, lesson_id)
@@ -111,10 +123,9 @@ def create_lesson_blueprint(
             lesson_title = lesson["title"]
         else:
             # File is missing. Check access.json to see if it was restricted
-            from pathlib import Path
+            import app as _app
             from minilms.access_control import get_lesson_access_codes
-            access_file = Path(__file__).parents[2] / "access.json"
-            has_hex = bool(get_lesson_access_codes(access_file, slug, lesson_id))
+            has_hex = bool(get_lesson_access_codes(_app.ACCESS_CODES_FILE, slug, lesson_id))
 
         if has_hex:
             if not session_manager.is_unlocked(slug, lesson_id):
@@ -174,9 +185,11 @@ def create_lesson_blueprint(
         # Grant session unlock (same as POST handler)
         lesson_files = _get_course_lessons(course_slug, course["title"] if course else "")
         lesson_ids = [item["id"] for item in lesson_files]
-        skeleton_keys = current_app.config["MINILMS_GET_COURSE_SKELETON_KEYS"](course_slug)
+        skeleton_keys = _get_course_skeleton_keys(course_slug)
         
-        if hex_id in skeleton_keys:
+        from minilms.access_control import verify_access_code
+        is_skeleton = any(verify_access_code(hex_id, key) for key in skeleton_keys)
+        if is_skeleton:
             session_manager.grant_skeleton_unlock(course_slug, lesson_ids)
         else:
             session_manager.grant_unlock(course_slug, lesson_id)
