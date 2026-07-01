@@ -280,10 +280,13 @@ def test_generated_code_unlocks_lesson_via_app(tmp_path, monkeypatch):
 
     client = app.test_client()
 
+    with client.session_transaction() as sess:
+        sess["_csrf_token"] = "test-csrf-token"
+
     # POST the code
     resp = client.post(
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": plain},
+        data={"access_code": plain, "_csrf_token": "test-csrf-token"},
     )
     assert resp.status_code == 302
     assert resp.headers["Location"] == "/courses/python-basics/lessons/1"
@@ -314,9 +317,69 @@ def test_expired_code_rejected_by_app(tmp_path, monkeypatch):
     monkeypatch.setattr("app.ACCESS_CODES_FILE", access_file)
 
     client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["_csrf_token"] = "test-csrf-token"
     resp = client.post(
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": plain},
+        data={"access_code": plain, "_csrf_token": "test-csrf-token"},
     )
     assert resp.status_code == 200
     assert b"Wrong access code." in resp.data
+
+
+def test_rehash_converts_plaintext_hex_codes(tmp_path):
+    data = {
+        "python-basics": {
+            "1": ["47a463c27f4", {"id": "K-aabb", "hash": hash_access_code("existing"), "created_at": "2026-01-01T00:00:00+00:00"}],
+            "skeleton_keys": ["deadbeef"],
+        },
+    }
+    access_file = tmp_path / "access.json"
+    access_file.write_text(json.dumps(data), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "manage_access.py"), "--file", str(access_file), "rehash"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Converted 2 code(s)" in result.stdout
+
+    updated = json.loads(access_file.read_text(encoding="utf-8"))
+    for code in updated["python-basics"]["1"]:
+        assert isinstance(code, dict)
+        assert "id" in code
+        assert code["id"].startswith("K-")
+        assert code["hash"].startswith("pbkdf2_sha256$")
+    for code in updated["python-basics"]["skeleton_keys"]:
+        assert isinstance(code, dict)
+        assert "id" in code
+        assert code["hash"].startswith("pbkdf2_sha256$")
+
+
+def test_rehash_dry_run_does_not_modify_file(tmp_path):
+    data = {"python-basics": {"1": ["a1b2c3"]}}
+    access_file = tmp_path / "access.json"
+    access_file.write_text(json.dumps(data), encoding="utf-8")
+    original = access_file.read_text()
+
+    result = subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "manage_access.py"), "--file", str(access_file), "rehash", "--dry-run"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Would convert 1 code(s)" in result.stdout
+    assert access_file.read_text() == original
+
+
+def test_rehash_no_legacy_codes_returns_clean_message(tmp_path):
+    hashed = hash_access_code("alreadyhashed")
+    data = {"python-basics": {"1": [{"id": "K-1234", "hash": hashed}]}}
+    access_file = tmp_path / "access.json"
+    access_file.write_text(json.dumps(data), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "manage_access.py"), "--file", str(access_file), "rehash"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "No legacy codes found" in result.stdout

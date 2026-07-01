@@ -1,6 +1,8 @@
 """Lesson access, public lesson, and hex-code lesson routes."""
 
-from flask import Blueprint, current_app, redirect, render_template, request, url_for
+import secrets
+
+from flask import Blueprint, current_app, redirect, render_template, request, session, url_for
 
 from minilms import session_manager
 
@@ -39,6 +41,15 @@ def _get_course_skeleton_keys(course_slug):
     return app.get_course_skeleton_keys(course_slug)
 
 
+def _csrf_token():
+    """Get or generate a CSRF token stored in the session."""
+    token = session.get("_csrf_token")
+    if token is None:
+        token = secrets.token_hex(32)
+        session["_csrf_token"] = token
+    return token
+
+
 def create_lesson_blueprint(
     limiter,
     access_post_limit,
@@ -75,6 +86,9 @@ def create_lesson_blueprint(
 
         error_message = ""
         if request.method == "POST":
+            submitted_token = request.form.get("_csrf_token", "")
+            if not submitted_token or not secrets.compare_digest(submitted_token, _csrf_token()):
+                return "CSRF token missing or invalid", 403
             access_code = request.form.get("access_code", "").strip().lower()
             if _is_access_code_valid_for_lesson(slug, lesson_id, access_code):
                 # Retrieve course lessons to get all IDs (needed for skeleton unlock)
@@ -104,6 +118,7 @@ def create_lesson_blueprint(
             course=course,
             lesson=lesson,
             error_message=error_message,
+            csrf_token=_csrf_token(),
         )
 
     @lesson_bp.get("/courses/<slug>/lessons/<int:lesson_id>")

@@ -14,9 +14,12 @@ def env_flag(name, default=False):
 
 
 def default_force_https():
-    """Enable HTTPS enforcement by default in production-like environments."""
-    environment = os.getenv("FLASK_ENV", "").strip().lower()
-    return environment in {"production", "staging"}
+    """Enable HTTPS enforcement by default in production-like environments.
+    Returns False by default so that Tor (.onion) deployments work out of
+    the box without needing to set FORCE_HTTPS=false. Set FORCE_HTTPS=true
+    explicitly to enable the redirect when running behind a TLS proxy.
+    """
+    return False
 
 
 def add_security_headers(response):

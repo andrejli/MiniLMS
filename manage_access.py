@@ -6,6 +6,7 @@ Usage:
   python manage_access.py gen-skeleton <course> [--days N | --hours N | --expires YYYY-MM-DD]
   python manage_access.py list [course]
   python manage_access.py revoke <code-id>
+  python manage_access.py rehash [--dry-run]
 """
 
 import argparse
@@ -258,6 +259,59 @@ def cmd_gen_skeleton(args):
     print(f"Use `revoke {code_id}` to invalidate it early.")
 
 
+def cmd_rehash(args):
+    global ACCESS_FILE
+    ACCESS_FILE = _resolve_file(getattr(args, "file", None))
+    data = _load()
+    now = datetime.now(timezone.utc)
+    converted = 0
+
+    for course in data:
+        for key in list(data[course].keys()):
+            items = data[course][key]
+            if not isinstance(items, list):
+                continue
+            new_items = []
+            for code in items:
+                if isinstance(code, dict):
+                    new_items.append(code)
+                elif isinstance(code, str):
+                    if code.startswith("pbkdf2_sha256$"):
+                        # Already hashed but has no ID — wrap it
+                        new_code = {
+                            "id": "K-" + secrets.token_hex(4),
+                            "hash": code,
+                            "created_at": now.isoformat(),
+                        }
+                        new_items.append(new_code)
+                        converted += 1
+                        print(f"  Wrapped hash for {course}/{key}")
+                    elif is_hex_access_code(code):
+                        new_code = {
+                            "id": "K-" + secrets.token_hex(4),
+                            "hash": hash_access_code(code),
+                            "created_at": now.isoformat(),
+                        }
+                        new_items.append(new_code)
+                        converted += 1
+                        print(f"  Hashed plaintext {code[:12]}... for {course}/{key}")
+                    else:
+                        # Unknown string format — keep as-is
+                        new_items.append(code)
+                else:
+                    new_items.append(code)
+            data[course][key] = new_items
+
+    if converted:
+        if getattr(args, "dry_run", False):
+            print(f"\nWould convert {converted} code(s). Pass --file and omit --dry-run to apply.")
+        else:
+            _save(data)
+            print(f"\nConverted {converted} code(s). access.json updated.")
+    else:
+        print("No legacy codes found — everything is already hashed.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Manage time-limited hex access codes.",
@@ -291,6 +345,10 @@ def main():
             "\n"
             "  # Use a different access file (default: ./access.json)\n"
             "  python manage_access.py --file /path/to/access.json list\n"
+            "\n"
+            "  # Convert legacy plaintext codes to hashed + ID entries\n"
+            "  python manage_access.py rehash\n"
+            "  python manage_access.py rehash --dry-run\n"
         ),
     )
     parser.add_argument(
@@ -359,6 +417,19 @@ def main():
     sk_expiry.add_argument("--hours", type=int, help="Hours until expiry")
     sk_expiry.add_argument("--expires", help="Expiry date (ISO-8601 or YYYY-MM-DD)")
     sk.set_defaults(func=cmd_gen_skeleton)
+
+    rh = sub.add_parser(
+        "rehash",
+        help="Convert legacy plaintext codes to hashed entries with IDs",
+        epilog=(
+            "Examples:\n"
+            "  python manage_access.py rehash --dry-run\n"
+            "  python manage_access.py rehash\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    rh.add_argument("--dry-run", action="store_true", help="Show what would be converted without saving")
+    rh.set_defaults(func=cmd_rehash)
 
     args = parser.parse_args()
     args.func(args)

@@ -19,6 +19,14 @@ def disable_rate_limiting(monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
 
 
+def _post_access(client, url, data, **kwargs):
+    """POST to an access endpoint with a valid CSRF token."""
+    with client.session_transaction() as sess:
+        sess["_csrf_token"] = "test-csrf-token"
+    data["_csrf_token"] = "test-csrf-token"
+    return client.post(url, data=data, **kwargs)
+
+
 def setup_content(tmp_path):
     content_root = tmp_path / "lessons"
     course_dir = content_root / "python-basics"
@@ -95,9 +103,10 @@ def test_access_flow_and_rendered_lesson(tmp_path, monkeypatch):
 
     client = app.app.test_client()
 
-    response = client.post(
+    response = _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "47a463c27f4"},
+        {"access_code": "47a463c27f4"},
     )
     assert response.status_code == 302
     assert response.headers["Location"] == "/courses/python-basics/lessons/1"
@@ -169,9 +178,10 @@ def test_summary_lesson_can_be_restricted_via_access_json(tmp_path, monkeypatch)
         "/courses/python-basics/lessons/0/access"
     )
 
-    unlocked = client.post(
+    unlocked = _post_access(
+        client,
         "/courses/python-basics/lessons/0/access",
-        data={"access_code": "a15555"},
+        {"access_code": "a15555"},
     )
     assert unlocked.status_code == 302
     assert unlocked.headers["Location"] == "/courses/python-basics/lessons/0"
@@ -188,9 +198,10 @@ def test_any_code_in_lesson_code_list_unlocks_lesson(tmp_path, monkeypatch):
 
     client = app.app.test_client()
 
-    response = client.post(
+    response = _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "abc123"},
+        {"access_code": "abc123"},
     )
     assert response.status_code == 302
     assert response.headers["Location"] == "/courses/python-basics/lessons/1"
@@ -213,9 +224,10 @@ def test_skeleton_key_unlocks_multiple_lessons(tmp_path, monkeypatch):
 
     client = app.app.test_client()
 
-    lesson0 = client.post(
+    lesson0 = _post_access(
+        client,
         "/courses/python-basics/lessons/0/access",
-        data={"access_code": "c0ffee"},
+        {"access_code": "c0ffee"},
     )
     assert lesson0.status_code == 302
     assert lesson0.headers["Location"] == "/courses/python-basics/lessons/0"
@@ -262,9 +274,10 @@ def test_non_hex_skeleton_key_is_ignored(tmp_path, monkeypatch):
 
     client = app.app.test_client()
 
-    response = client.post(
+    response = _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "masterkey"},
+        {"access_code": "masterkey"},
     )
     assert response.status_code == 200
     assert b"Wrong access code." in response.data
@@ -358,16 +371,18 @@ def test_rate_limit_blocks_6th_access_post_attempt(tmp_path, monkeypatch):
     client = app.app.test_client()
     url = "/courses/python-basics/lessons/1/access"
     for _ in range(5):
-        response = client.post(
+        response = _post_access(
+            client,
             url,
-            data={"access_code": "wrongcode"},
+            {"access_code": "wrongcode"},
             environ_overrides={"REMOTE_ADDR": "10.10.10.1"},
         )
         assert response.status_code == 200
 
-    throttled = client.post(
+    throttled = _post_access(
+        client,
         url,
-        data={"access_code": "wrongcode"},
+        {"access_code": "wrongcode"},
         environ_overrides={"REMOTE_ADDR": "10.10.10.1"},
     )
     assert throttled.status_code == 429
@@ -383,9 +398,10 @@ def test_rate_limit_429_includes_retry_after_header(tmp_path, monkeypatch):
     client = app.app.test_client()
     url = "/courses/python-basics/lessons/1/access"
     for _ in range(6):
-        throttled = client.post(
+        throttled = _post_access(
+            client,
             url,
-            data={"access_code": "wrongcode"},
+            {"access_code": "wrongcode"},
             environ_overrides={"REMOTE_ADDR": "10.10.10.2"},
         )
 
@@ -461,39 +477,35 @@ def test_valid_access_code_succeeds_under_threshold_with_rate_limit_enabled(
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
 
     client = app.app.test_client()
-    response = client.post(
+    response = _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "47a463c27f4"},
+        {"access_code": "47a463c27f4"},
         environ_overrides={"REMOTE_ADDR": "10.10.10.3"},
     )
     assert response.status_code == 302
     assert response.headers["Location"] == "/courses/python-basics/lessons/1"
 
 
-def test_rate_limits_are_separate_for_different_ips(tmp_path, monkeypatch):
+def test_rate_limits_are_separate_per_session(tmp_path, monkeypatch):
     content_root = setup_content(tmp_path)
     access_file = setup_access_codes(tmp_path)
     monkeypatch.setattr(app, "CONTENT_ROOT", content_root)
     monkeypatch.setattr(app, "ACCESS_CODES_FILE", access_file)
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
 
-    client = app.app.test_client()
     url = "/courses/python-basics/lessons/1/access"
+
+    # First session hits the limit after 5 attempts
+    session_a = app.app.test_client()
     for _ in range(6):
-        first_ip = client.post(
-            url,
-            data={"access_code": "wrongcode"},
-            environ_overrides={"REMOTE_ADDR": "10.10.10.4"},
-        )
+        hit = _post_access(session_a, url, {"access_code": "wrongcode"})
+    assert hit.status_code == 429
 
-    second_ip = client.post(
-        url,
-        data={"access_code": "wrongcode"},
-        environ_overrides={"REMOTE_ADDR": "10.10.10.5"},
-    )
-
-    assert first_ip.status_code == 429
-    assert second_ip.status_code == 200
+    # Second session has its own limit bucket — first request succeeds
+    session_b = app.app.test_client()
+    fresh = _post_access(session_b, url, {"access_code": "wrongcode"})
+    assert fresh.status_code == 200
 
 
 def test_security_headers_are_applied_on_html_responses(tmp_path, monkeypatch):
@@ -549,9 +561,10 @@ def test_session_persists_unlock_across_requests(tmp_path, monkeypatch):
     client = app.app.test_client()
     
     # 1. Access code entry redirects to clean URL
-    response = client.post(
+    response = _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "47a463c27f4"},
+        {"access_code": "47a463c27f4"},
     )
     assert response.status_code == 302
     assert response.headers["Location"] == "/courses/python-basics/lessons/1"
@@ -619,9 +632,10 @@ def test_session_does_not_leak_across_courses(tmp_path, monkeypatch):
     client = app.app.test_client()
     
     # Unlock python-basics lesson 1
-    client.post(
+    _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "47a463c27f4"},
+        {"access_code": "47a463c27f4"},
     )
     
     # Check it_sec lesson 1 is still locked
@@ -644,9 +658,10 @@ def test_unlocked_set_in_template(tmp_path, monkeypatch):
     assert b"VIEW LESSON" not in detail_pre.data
 
     # 2. Unlock the lesson
-    client.post(
+    _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "47a463c27f4"},
+        {"access_code": "47a463c27f4"},
     )
     
     # 3. Now course detail shows VIEW LESSON
@@ -669,17 +684,19 @@ def test_hashed_access_code(tmp_path, monkeypatch):
     client = app.app.test_client()
 
     # Wrong code should fail
-    response_fail = client.post(
+    response_fail = _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "wrongkey"},
+        {"access_code": "wrongkey"},
     )
     assert response_fail.status_code == 200
     assert b"Wrong access code." in response_fail.data
 
     # Correct code should succeed
-    response_success = client.post(
+    response_success = _post_access(
+        client,
         "/courses/python-basics/lessons/1/access",
-        data={"access_code": "secretkey"},
+        {"access_code": "secretkey"},
     )
     assert response_success.status_code == 302
     assert response_success.headers["Location"] == "/courses/python-basics/lessons/1"

@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 
 from cachelib import FileSystemCache
-from flask import Flask, request
+from flask import Flask, request, session
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_session import Session
@@ -68,13 +68,34 @@ def rate_limit_enabled():
     return env_flag("RATE_LIMIT_ENABLED", default=RATE_LIMIT_ENABLED)
 
 
-def limit_key_ip_plus_route():
-    """Use IP + concrete request path for stricter endpoint-specific throttling."""
-    return f"{get_remote_address()}:{request.path}"
+def _session_or_ip():
+    """Return stable session ID, falling back to client IP."""
+    try:
+        sid = session.sid
+        if sid:
+            # Touch the session so flask-session's save_session persists it
+            # with a cookie. Without this, an empty/unmodified session won't
+            # get a Set-Cookie header, each request creates a new SID, and
+            # session-based rate limiting never accumulates a counter.
+            session.setdefault("_sd", True)
+            return f"sess:{sid}"
+    except (RuntimeError, AttributeError, TypeError, KeyError):
+        pass
+    return get_remote_address()
+
+
+def limit_key():
+    """Global rate limit key: session ID when available, else IP."""
+    return _session_or_ip()
+
+
+def limit_key_sid_plus_route():
+    """Per-route rate limit key: session ID + path, else IP + path."""
+    return f"{_session_or_ip()}:{request.path}"
 
 
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=limit_key,
     app=app,
     default_limits=[RATE_LIMIT_GLOBAL_HOURLY, RATE_LIMIT_GLOBAL_MINUTE],
     default_limits_exempt_when=lambda: not rate_limit_enabled(),
@@ -152,18 +173,29 @@ register_blueprints(
     app=app,
     limiter=limiter,
     access_post_limit=f"{RATE_LIMIT_ACCESS_POST_MINUTE};{RATE_LIMIT_ACCESS_POST_HOURLY}",
-    limit_key_func=limit_key_ip_plus_route,
+    limit_key_func=limit_key_sid_plus_route,
     exempt_limiter=lambda: not rate_limit_enabled(),
 )
 
 
+CACHE_HTML_MAX_AGE_SECS = int(os.getenv("CACHE_HTML_MAX_AGE", "3600"))
+
 @app.after_request
-def disable_html_cache(response):
-    """Prevent stale browser-cached HTML during content editing."""
-    if response.mimetype == "text/html":
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+def set_html_cache(response):
+    """Allow browser caching of HTML for a configurable window.
+
+    Set CACHE_HTML_MAX_AGE=0 (or via env) to restore the previous
+    no-store behaviour during content editing. Default is 3600 (1 hour).
+    """
+    if response.mimetype == "text/html" and response.status_code == 200:
+        response.headers["Cache-Control"] = f"private, max-age={CACHE_HTML_MAX_AGE_SECS}"
+        response.headers["Pragma"] = "cache"
+    return response
+
+
+@app.after_request
+def remove_server_header(response):
+    response.headers.pop("Server", None)
     return response
 
 
